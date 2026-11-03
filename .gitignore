@@ -1,0 +1,4 @@
+bin/
+data/
+# Live login and server details; never commit.
+sms-details.json

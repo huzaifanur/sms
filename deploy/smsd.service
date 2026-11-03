@@ -1,0 +1,28 @@
+[Unit]
+Description=smsd SMS API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smsd
+Group=smsd
+WorkingDirectory=/var/lib/smsd
+ExecStart=/opt/smsd/current/smsd
+# Login, gateway credentials and SIM; created once by activate.sh, edited by hand.
+EnvironmentFile=/etc/smsd/smsd.env
+Environment=SMS_LISTEN=127.0.0.1:8097
+Environment=SMS_DATA_DIR=/var/lib/smsd
+StateDirectory=smsd
+UMask=0077
+Restart=on-failure
+RestartSec=5
+# The worker lets the message in flight finish before exiting.
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

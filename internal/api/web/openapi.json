@@ -1,0 +1,285 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SMS API",
+    "version": "1.0.0",
+    "description": "Send SMS through one SIM on an Android phone running SMSGate. Every message is queued and sent at a safe pace: a 6-9 s gap, at most 150 segments per 15 minutes and 450 per day. Requests return a job at once. Poll `GET /api/jobs/{id}` for progress.\n\nNumbers may be written as `03001234567`, `+923001234567` or `923001234567`, and must be Pakistani mobiles."
+  },
+  "servers": [{ "url": "/", "description": "This server" }],
+  "security": [{ "basic": [] }],
+  "tags": [
+    { "name": "Send", "description": "Queue messages" },
+    { "name": "Jobs", "description": "Track, cancel and resume jobs" },
+    { "name": "Server", "description": "Gateway and quota status" }
+  ],
+  "paths": {
+    "/api/send": {
+      "post": {
+        "tags": ["Send"],
+        "summary": "Send one message",
+        "operationId": "send",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Message" },
+              "example": { "to": "03001234567", "body": "Salam, the meeting moved to 5pm." }
+            }
+          }
+        },
+        "responses": {
+          "202": { "$ref": "#/components/responses/Queued" },
+          "200": { "$ref": "#/components/responses/Replayed" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    },
+    "/api/bulk": {
+      "post": {
+        "tags": ["Send"],
+        "summary": "Send many messages",
+        "description": "Send either `to` (a list of numbers) with one `body` for all of them, or `messages` (a body per number), not both. A repeat of the same number and body is skipped. Any invalid item rejects the whole request unless `skip_invalid` is true.",
+        "operationId": "bulk",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BulkRequest" },
+              "examples": {
+                "sameBody": {
+                  "summary": "One body for every number",
+                  "value": { "to": ["03001234567", "03007654321"], "body": "Salam, the meeting moved to 5pm." }
+                },
+                "perNumber": {
+                  "summary": "A body per number",
+                  "value": {
+                    "messages": [
+                      { "to": "03001234567", "body": "Salam Ali, your fee is due Friday." },
+                      { "to": "03007654321", "body": "Salam Sara, your fee is due Monday." }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "$ref": "#/components/responses/Queued" },
+          "200": { "$ref": "#/components/responses/Replayed" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "413": { "description": "More than 1000 messages", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "$ref": "#/components/responses/Invalid" }
+        }
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "tags": ["Jobs"],
+        "summary": "List the 50 newest jobs",
+        "operationId": "listJobs",
+        "responses": {
+          "200": {
+            "description": "Jobs, newest first, without their messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["jobs"],
+                  "properties": { "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/Job" } } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/jobs/{id}": {
+      "get": {
+        "tags": ["Jobs"],
+        "summary": "Get a job and every message's state",
+        "operationId": "getJob",
+        "parameters": [{ "$ref": "#/components/parameters/JobID" }],
+        "responses": {
+          "200": { "description": "The job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/jobs/{id}/cancel": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Cancel a job",
+        "description": "Drops the job's unsent messages. A message already handed to the phone still goes out.",
+        "operationId": "cancelJob",
+        "parameters": [{ "$ref": "#/components/parameters/JobID" }],
+        "responses": {
+          "200": { "description": "The job after cancelling", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Finished" }
+        }
+      }
+    },
+    "/api/jobs/{id}/resume": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Resume a stopped or paused job",
+        "description": "Requeues the job now. Fix what stopped it first (see its `reason`). Messages that may already be on the phone are looked up, never resent blindly.",
+        "operationId": "resumeJob",
+        "parameters": [{ "$ref": "#/components/parameters/JobID" }],
+        "responses": {
+          "200": { "description": "The job after requeueing", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Finished" }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": ["Server"],
+        "summary": "Gateway check, hours and usage",
+        "operationId": "status",
+        "responses": {
+          "200": { "description": "Current status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "tags": ["Server"],
+        "summary": "Liveness check",
+        "operationId": "healthz",
+        "security": [],
+        "responses": { "200": { "description": "The server is up", "content": { "text/plain": { "schema": { "type": "string", "const": "ok\n" } } } } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "basic": { "type": "http", "scheme": "basic", "description": "Username and password (`SMS_AUTH_USER` and `SMS_AUTH_PASSWORD` on the server)" }
+    },
+    "parameters": {
+      "JobID": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "k3m9qa" },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Any unique string. Sending the same key again returns the original job (200) instead of sending again.",
+        "schema": { "type": "string" }
+      }
+    },
+    "responses": {
+      "Queued": { "description": "Queued as a new job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+      "Replayed": { "description": "The Idempotency-Key was used before. This is that job.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } },
+      "BadRequest": { "description": "Malformed JSON or an unknown field", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing or wrong username and password", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "No such job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Finished": { "description": "The job is already done or cancelled", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Invalid": {
+        "description": "Some messages are invalid. Nothing was queued.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["error", "invalid"],
+              "properties": {
+                "error": { "type": "string" },
+                "invalid": { "type": "array", "items": { "$ref": "#/components/schemas/Problem" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Message": {
+        "type": "object",
+        "required": ["to", "body"],
+        "additionalProperties": false,
+        "properties": {
+          "to": { "type": "string", "description": "Pakistani mobile number in any common format", "example": "03001234567" },
+          "body": { "type": "string", "description": "Text. GSM-7 fits 160 characters per SMS. Urdu or emoji switch to UCS-2, 70 per SMS. The server allows up to `max_segments` SMS per message.", "example": "Salam, the meeting moved to 5pm." }
+        }
+      },
+      "BulkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" }, "maxItems": 1000, "description": "Numbers that all get `body`" },
+          "body": { "type": "string", "description": "Text sent to every number in `to`" },
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/Message" }, "maxItems": 1000, "description": "A body per number, instead of `to` and `body`" },
+          "skip_invalid": { "type": "boolean", "default": false, "description": "Queue the valid messages and list the invalid ones under `skipped`" }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": ["id", "kind", "state", "sim", "created_at", "updated_at", "counts"],
+        "properties": {
+          "id": { "type": "string", "example": "k3m9qa" },
+          "kind": { "type": "string", "enum": ["send", "bulk"] },
+          "state": {
+            "type": "string",
+            "enum": ["queued", "running", "paused", "stopped", "done", "cancelled"],
+            "description": "`paused` resumes on its own (hours ended, daily cap, a stuck message, a restart). `stopped` needs a resume after the cause is fixed (circuit breaker, HTTP 401, phone unreachable, warm-up failed)."
+          },
+          "reason": { "type": "string", "description": "Why the job paused, stopped or was cancelled" },
+          "sim": { "type": "integer", "enum": [1, 2] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "counts": { "type": "object", "additionalProperties": { "type": "integer" }, "description": "Messages per state", "example": { "delivered": 12, "queued": 3 } },
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/MessageState" }, "description": "Present on a single job, absent in lists" },
+          "skipped": { "type": "array", "items": { "$ref": "#/components/schemas/Problem" }, "description": "Only in the response that created the job: repeats, and invalid items when `skip_invalid` was set" }
+        }
+      },
+      "MessageState": {
+        "type": "object",
+        "required": ["index", "to", "state", "segments"],
+        "properties": {
+          "index": { "type": "integer", "description": "1-based position in the request" },
+          "to": { "type": "string", "description": "Normalized number", "example": "+923001234567" },
+          "state": { "type": "string", "enum": ["queued", "submitting", "pending", "processed", "sent", "delivered", "failed", "expired", "cancelled"] },
+          "segments": { "type": "integer", "description": "SMS parts this message costs" },
+          "error": { "type": "string" },
+          "submitted_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["index", "to", "error"],
+        "properties": {
+          "index": { "type": "integer", "description": "1-based position in the request" },
+          "to": { "type": "string", "description": "The number as sent" },
+          "error": { "type": "string" }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "properties": {
+          "gateway": { "type": "string", "description": "`ok`, or why SMSGate can't be used" },
+          "sim": { "type": "integer" },
+          "hours": { "type": "string", "example": "00:00-24:00 Asia/Karachi" },
+          "in_hours": { "type": "boolean" },
+          "last_15m": { "type": "string", "description": "Segments used / allowed in the rolling 15 minutes", "example": "12/150" },
+          "today": { "type": "string", "description": "Segments used / allowed today", "example": "40/450" },
+          "max_segments": { "type": "integer" },
+          "running_job": { "type": "string", "description": "Job being sent now, or empty" },
+          "next_slot_utc": { "type": ["string", "null"], "format": "date-time", "description": "When the 15-minute cap frees a slot, or null if one is free now" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}

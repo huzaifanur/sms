@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMS API docs</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+<style>
+  body { margin: 0; background: #fff; }
+  .topbar-note { font: 14px/1.4 system-ui, sans-serif; padding: 10px 16px; background: #f4f6f8; border-bottom: 1px solid #dde2e7; }
+  .topbar-note a { color: #1f6feb; }
+</style>
+</head>
+<body>
+<div class="topbar-note">"Try it out" uses the login you signed in with. <a href="/">Back to the sender</a> · <a href="/openapi.json">openapi.json</a></div>
+<div id="ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+<script>
+  SwaggerUIBundle({ url: "/openapi.json", dom_id: "#ui", persistAuthorization: true, deepLinking: true });
+</script>
+</body>
+</html>
